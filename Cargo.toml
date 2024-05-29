@@ -1,0 +1,14 @@
+[package]
+name = "arm-spec-parser"
+version = "0.1.0"
+authors = ["JC Alvarado <joncarloalvarado@gmail.com>"]
+edition = "2021"
+description = "A parser for the ARM ISA XML specification written with quick-xml"
+license = "BSD-3-Clause"
+keywords = ["aarch64", "arm64", "arm", "xml", "specification"]
+categories = ["parser-implementations"]
+
+[dependencies]
+nom = "7.1.3"
+quick-xml = { version = "0.31.0", features = ["serialize", "overlapped-lists"] }
+serde = { version = "1.0.197", features = ["derive"] }
