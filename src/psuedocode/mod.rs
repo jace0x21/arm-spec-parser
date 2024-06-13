@@ -1,3 +1,6 @@
+pub mod span;
+use span::Span;
+
 use nom::IResult;
 use nom::bytes::complete::{tag, take_while};
 use nom::character::complete::char;
