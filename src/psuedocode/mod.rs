@@ -93,32 +93,32 @@ pub fn is_alphanumeric(c: char) -> bool {
     c.is_alphanumeric()
 }
 
-pub fn identifier(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn identifier(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, value) = take_while(not_whitespace)(code)?;
-    Ok((input, Expr::Identifier(value.into())))
+    Ok((input, Expr::Identifier(value.input.into())))
 }
 
-pub fn binary_constant(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn binary_constant(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, constant) = delimited(char('\''), take_while(is_alphanumeric), char('\''))(code)?;
-    Ok((input, Expr::BinaryConstant(BinaryConstantExpr { value: constant.into() })))
+    Ok((input, Expr::BinaryConstant(BinaryConstantExpr { value: constant.input.into() })))
 }
 
-pub fn binary_pattern(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn binary_pattern(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, constant) = delimited(tag("{'"), take_while(is_alphanumeric), tag("'}"))(code)?;
-    Ok((input, Expr::BinaryPattern(BinaryPatternExpr { value: constant.into() })))
+    Ok((input, Expr::BinaryPattern(BinaryPatternExpr { value: constant.input.into() })))
 }
 
-pub fn eq(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn eq(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, (left, right)) = separated_pair(term, tag(" == "), expr)(code)?;
     Ok((input, Expr::Equal(EqualOperator { left: Box::new(left), right: Box::new(right) })))
 }
 
-pub fn and(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn and(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, (left, right)) = separated_pair(term, tag(" && "), expr)(code)?;
     Ok((input, Expr::And(AndOperator { left: Box::new(left), right: Box::new(right) })))
 }
 
-pub fn term(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
         binary_pattern,
         binary_constant,
@@ -126,7 +126,7 @@ pub fn term(code: &str) -> IResult<&str, Expr, Error<&str>> {
     ))(code)
 }
 
-pub fn expr(code: &str) -> IResult<&str, Expr, Error<&str>> {
+pub fn expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
         and,
         eq,
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     pub fn test_eq_statement() {
-        let code = "Ra == '11111'";
+        let code = Span { input: "Ra == '11111'", min_precedence: 0 };
         let (input, ast) = expr(code).unwrap();
         assert_eq!(ast, Expr::Equal(EqualOperator {
             left: Box::new(Expr::Identifier("Ra".into())),
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     pub fn test_precedence() {
-        let code = "A == '0' && Rt == '11111'";
+        let code = Span { input: "A == '0' && Rt == '11111'", min_precedence: 0 };
         let (input, ast) = expr(code).unwrap();
         assert_eq!(ast, Expr::And(AndOperator {
             left: Box::new(Expr::Equal(EqualOperator {

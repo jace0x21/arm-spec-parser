@@ -20,7 +20,7 @@ use nom::{
 
 use nom::error::{ErrorKind, ParseError};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Span<'a> {
     pub input: &'a str,
     pub min_precedence: u32,
