@@ -478,4 +478,67 @@ mod tests {
             })),
         }));        
     }
+
+    #[test]
+    pub fn test_add_comparison() {
+        let ast = parse_expr("UInt (imms) + 1 == UInt (immr)").unwrap();
+        assert_eq!(ast, Expr::Equal(EqualOperator { 
+            left: Box::new(Expr::Add(AddOperator { 
+                left: Box::new(Expr::Call(CallExpr { 
+                    identifier: Box::new(Expr::Identifier("UInt".into())), 
+                    arguments: vec![Expr::Identifier("imms".into())], 
+                })),
+                right: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })),
+            })), 
+            right: Box::new(Expr::Call(CallExpr { 
+                identifier: Box::new(Expr::Identifier("UInt".into())), 
+                arguments: vec![Expr::Identifier("immr".into())],
+            })), 
+        }));
+    }
+
+    #[test]
+    pub fn test_complex_comparison() {
+        let ast = parse_expr("imms != '011111' && UInt (imms) + 1 == UInt (immr)").unwrap();
+        assert_eq!(ast, Expr::And(AndOperator {
+            left: Box::new(Expr::NotEqual(NotEqualOperator {
+                left: Box::new(Expr::Identifier("imms".into())),
+                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "011111".into() })),
+            })),
+            right: Box::new(Expr::Equal(EqualOperator { 
+                left: Box::new(Expr::Add(AddOperator { 
+                    left: Box::new(Expr::Call(CallExpr { 
+                        identifier: Box::new(Expr::Identifier("UInt".into())), 
+                        arguments: vec![Expr::Identifier("imms".into())], 
+                    })),
+                    right: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })),
+                })), 
+                right: Box::new(Expr::Call(CallExpr { 
+                    identifier: Box::new(Expr::Identifier("UInt".into())), 
+                    arguments: vec![Expr::Identifier("immr".into())],
+                })), 
+            })),
+        }));
+    }
+
+    #[test]
+    pub fn test_and_left_associative() {
+        let ast = parse_expr("imms == '1' && immr == '1' && S == '1'").unwrap();
+        assert_eq!(ast, Expr::And(AndOperator {
+            left: Box::new(Expr::And(AndOperator {
+                left: Box::new(Expr::Equal(EqualOperator {
+                    left: Box::new(Expr::Identifier("imms".into())),
+                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                })),
+                right: Box::new(Expr::Equal(EqualOperator {
+                    left: Box::new(Expr::Identifier("immr".into())),
+                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                })),
+            })),
+            right: Box::new(Expr::Equal(EqualOperator {
+                left: Box::new(Expr::Identifier("S".into())),
+                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+            })),
+        }));    
+    }
 }
