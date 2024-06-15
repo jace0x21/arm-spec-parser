@@ -120,6 +120,10 @@ pub fn not_whitespace(c: char) -> bool {
     c != ' '
 }
 
+pub fn is_whitespace(c: char) -> bool {
+    c == ' '
+}
+
 pub fn is_alphanumeric(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '<' || c == '>'
 }
@@ -183,19 +187,28 @@ pub fn call_arguments(code: Span) -> IResult<Span, Vec<Expr>, Error<Span>> {
 //}
 
 pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
-    alt((
-        parens,
-        not_term,
-        call,
-        binary_pattern,
-        binary_constant,
-        decimal_constant,
-        identifier,
-    ))(code)
+    preceded(
+        take_while(is_whitespace),
+        alt((
+            parens,
+            not_term,
+            call,
+            binary_pattern,
+            binary_constant,
+            decimal_constant,
+            identifier,
+        )),
+    )(code)
 }
 
-pub fn not_term(code: Span) -> IResult<Span, Expr, Error<Span>> {
-    let (i, expr) = preceded(tag("! "), term)(code)?;
+pub fn not_term(mut code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let old_precedence = code.min_precedence;
+    code.min_precedence = 0;
+    let (mut i, expr) = alt((
+        preceded(tag("! "), expr),
+        delimited(tag("!("), expr, tag(")")),
+    ))(code)?;
+    i.min_precedence = old_precedence;
     Ok((i, Expr::Not(NotOperator { operand: Box::new(expr) })))
 }
 
@@ -615,5 +628,27 @@ mod tests {
     pub fn test_identifier_with_brackets() {
         let ast = parse_expr("opc<1>").unwrap();
         assert_eq!(ast, Expr::Identifier("opc<1>".into()));
+    }
+
+    #[test]
+    pub fn test_not_with_leading_whitespace() {
+        let ast = parse_expr("!( IsZero (imm16))").unwrap();
+        assert_eq!(ast, Expr::Not(NotOperator { 
+            operand: Box::new(Expr::Call(CallExpr {
+                identifier: Box::new(Expr::Identifier("IsZero".into())),
+                arguments: vec![Expr::Identifier("imm16".into())],
+            })), 
+        }))
+    }
+
+    #[test]
+    pub fn test_not_expr() {
+        let ast = parse_expr("!( S == '1')").unwrap();
+        assert_eq!(ast, Expr::Not(NotOperator { 
+            operand: Box::new(Expr::Equal(EqualOperator { 
+                left: Box::new(Expr::Identifier("S".into())), 
+                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })), 
+            })), 
+        }));
     }
 }
