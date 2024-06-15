@@ -10,7 +10,7 @@ use nom::multi::separated_list0;
 use nom::sequence::{delimited, preceded, separated_pair};
 use nom::error::{Error, ErrorKind};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     Add(AddOperator),
     Not(NotOperator),
@@ -30,88 +30,88 @@ pub enum Expr {
     Call(CallExpr),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AddOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CallExpr {
     pub identifier: Box<Expr>,
     pub arguments: Vec<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EqualOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NotEqualOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LessThanOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GreaterThanOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LessThanEqualOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GreaterThanEqualOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OrOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AndOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NotOperator {
     pub operand: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InOperator {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BinaryConstantExpr {
     pub value: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DecimalConstantExpr {
     pub value: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BinaryPatternExpr {
     pub value: String,
 }
@@ -158,6 +158,10 @@ pub fn call(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((i, Expr::Call(CallExpr { identifier: Box::new(identifier), arguments })))
 }
 
+pub fn parens(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    delimited(tag("("), expr, tag(")"))(code)
+}
+
 pub fn call_arguments(code: Span) -> IResult<Span, Vec<Expr>, Error<Span>> {
     delimited(tag("("), separated_list0(tag(", "), identifier), tag(")"))(code)
 }
@@ -174,6 +178,7 @@ pub fn call_arguments(code: Span) -> IResult<Span, Vec<Expr>, Error<Span>> {
 
 pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
+        parens,
         not_term,
         call,
         binary_pattern,
@@ -540,5 +545,14 @@ mod tests {
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
             })),
         }));    
+    }
+
+    #[test]
+    pub fn test_parens() {
+        let ast = parse_expr("(Rn == '1')").unwrap();
+        assert_eq!(ast, Expr::Equal(EqualOperator {
+            left: Box::new(Expr::Identifier("Rn".into())),
+            right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() }))
+        }));
     }
 }
