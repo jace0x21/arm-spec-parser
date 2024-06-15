@@ -121,7 +121,7 @@ pub fn not_whitespace(c: char) -> bool {
 }
 
 pub fn is_alphanumeric(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
+    c.is_alphanumeric() || c == '_' || c == '<' || c == '>'
 }
 
 pub fn is_digit(c: char) -> bool {
@@ -609,5 +609,11 @@ mod tests {
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
             })),
         }));
+    }
+
+    #[test]
+    pub fn test_identifier_with_brackets() {
+        let ast = parse_expr("opc<1>").unwrap();
+        assert_eq!(ast, Expr::Identifier("opc<1>".into()));
     }
 }
