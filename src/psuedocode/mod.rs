@@ -589,4 +589,25 @@ mod tests {
             })),
         }));
     }
+    
+    #[test]
+    pub fn test_mixed_ops_left_associative() {
+        let ast = parse_expr("sh == '0' && Rd == '1' || Rn == '1'").unwrap();
+        assert_eq!(ast, Expr::Or(OrOperator {
+            left: Box::new(Expr::And(AndOperator {
+                left: Box::new(Expr::Equal(EqualOperator { 
+                    left: Box::new(Expr::Identifier("sh".into())), 
+                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() })),
+                })),
+                right: Box::new(Expr::Equal(EqualOperator { 
+                    left: Box::new(Expr::Identifier("Rd".into())), 
+                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                })),
+            })),
+            right: Box::new(Expr::Equal(EqualOperator { 
+                left: Box::new(Expr::Identifier("Rn".into())), 
+                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+            })),
+        }));
+    }
 }
