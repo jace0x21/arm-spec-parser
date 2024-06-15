@@ -158,8 +158,14 @@ pub fn call(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((i, Expr::Call(CallExpr { identifier: Box::new(identifier), arguments })))
 }
 
-pub fn parens(code: Span) -> IResult<Span, Expr, Error<Span>> {
-    delimited(tag("("), expr, tag(")"))(code)
+pub fn parens(mut code: Span) -> IResult<Span, Expr, Error<Span>> {
+    // We are recursing into expr in a different context from our precedence climbing loop.
+    // We reset precedence so we can treat the expression in parenthesis as a new one.
+    let old_precedence = code.min_precedence;
+    code.min_precedence = 0;
+    let (mut i, expr) = delimited(tag("("), expr, tag(")"))(code)?;
+    i.min_precedence = old_precedence;
+    Ok((i, expr))
 }
 
 pub fn call_arguments(code: Span) -> IResult<Span, Vec<Expr>, Error<Span>> {
@@ -198,6 +204,7 @@ pub fn operator(code: Span) -> IResult<Span, &str, Error<Span>> {
         tag(" == "),
         tag(" != "),
         tag(" && "),
+        tag(" || "),
         tag(" IN "),
         tag(" > "),
         tag(" < "),
@@ -229,6 +236,12 @@ pub fn build_expr(op: &str, lhs: Expr, rhs: Expr) -> Expr {
             AndOperator { 
                 left: Box::new(lhs), 
                 right: Box::new(rhs), 
+            }
+        ),
+        " || " => Expr::Or(
+            OrOperator { 
+                left: Box::new(lhs),
+                right: Box::new(rhs),
             }
         ),
         " != " => Expr::NotEqual(
@@ -553,6 +566,27 @@ mod tests {
         assert_eq!(ast, Expr::Equal(EqualOperator {
             left: Box::new(Expr::Identifier("Rn".into())),
             right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() }))
+        }));
+    }
+
+    #[test]
+    pub fn test_parens_precedence() {
+        let ast = parse_expr("sh == '0' && (Rd == '1' || Rn == '1')").unwrap();
+        assert_eq!(ast, Expr::And(AndOperator {
+            left: Box::new(Expr::Equal(EqualOperator { 
+                left: Box::new(Expr::Identifier("sh".into())), 
+                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() })),
+            })),
+            right: Box::new(Expr::Or(OrOperator {
+                left: Box::new(Expr::Equal(EqualOperator { 
+                    left: Box::new(Expr::Identifier("Rd".into())), 
+                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                })),
+                right: Box::new(Expr::Equal(EqualOperator { 
+                    left: Box::new(Expr::Identifier("Rn".into())), 
+                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                })),
+            })),
         }));
     }
 }
