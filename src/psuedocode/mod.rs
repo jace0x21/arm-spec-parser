@@ -158,7 +158,7 @@ pub fn binary_pattern(code: Span) -> IResult<Span, Expr, Error<Span>> {
 }
 
 pub fn call(code: Span) -> IResult<Span, Expr, Error<Span>> {
-    let (i, (identifier, arguments)) = separated_pair(identifier, tag(" "), call_arguments)(code)?;
+    let (i, (identifier, arguments)) = separated_pair(identifier, take_while(is_whitespace), call_arguments)(code)?;
     Ok((i, Expr::Call(CallExpr { identifier: Box::new(identifier), arguments })))
 }
 
@@ -459,8 +459,23 @@ mod tests {
     }
 
     #[test]
-    pub fn test_compare_calls() {
+    pub fn test_compare_calls_leading_whitespace() {
         let ast = parse_expr("UInt (imms) < UInt (immr)").unwrap();
+        assert_eq!(ast, Expr::LessThan(LessThanOperator {
+            left: Box::new(Expr::Call(CallExpr { 
+                identifier: Box::new(Expr::Identifier("UInt".into())), 
+                arguments: vec![Expr::Identifier("imms".into())], 
+            })),
+            right: Box::new(Expr::Call(CallExpr {
+                identifier: Box::new(Expr::Identifier("UInt".into())), 
+                arguments: vec![Expr::Identifier("immr".into())], 
+            })),
+        }));
+    }
+
+    #[test]
+    pub fn test_compare_calls() {
+        let ast = parse_expr("UInt(imms) < UInt(immr)").unwrap();
         assert_eq!(ast, Expr::LessThan(LessThanOperator {
             left: Box::new(Expr::Call(CallExpr { 
                 identifier: Box::new(Expr::Identifier("UInt".into())), 

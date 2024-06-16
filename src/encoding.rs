@@ -298,6 +298,31 @@ pub struct AliasPref {
     pub value: Vec<AliasPrefValue>,
 }
 
+impl AliasPref {
+    /// Return alias pref as a string, discarding any link metadata.
+    pub fn to_string(&self) -> String {
+        let mut str_repr = String::new();
+        for value in &self.value {
+            match value {
+                AliasPrefValue::Link(t) => str_repr.push_str(t.value.as_str()),
+                AliasPrefValue::Text(t) => {
+                    // quick_xml seems to trim trailing whitespace 
+                    // Add whitespace back in when we notice an operator 
+                    // at the end of string
+                    let ends_with_operator = t.ends_with(|c| {
+                        c == '|' || c == '&' || c == '>' || c == '<' || c == '=' || c == 'N'
+                    });
+                    str_repr.push_str(t.as_str());
+                    if ends_with_operator {
+                        str_repr.push(' ');
+                    }
+                },
+            }
+        }
+        str_repr
+    }
+}
+
 #[derive(Deserialize)]
 pub enum AliasPrefValue {
     #[serde(rename = "a")]
@@ -654,6 +679,22 @@ mod tests {
         let ebox: EncodingBox = from_str(&xml).expect("Deserialization failed");
         assert_eq!(ebox.hibit, 31);
         assert_eq!(ebox.name, Some(String::from("op")));
+    }
+
+    #[test]
+    fn test_aliaspref() {
+        let xml = "<aliaspref>Rn == '11111' &amp;&amp; <a link=\"impl-shared.UInt.1\" file=\"shared_pseudocode.xml\" hover=\"function: integer UInt(bits(N) x)\">UInt</a>(imms) &lt; <a link=\"impl-shared.UInt.1\" file=\"shared_pseudocode.xml\" hover=\"function: integer UInt(bits(N) x)\">UInt</a>(immr)</aliaspref>";
+        let aliaspref: AliasPref = from_str(&xml).expect("Deserialization failed");
+        assert_eq!(aliaspref.value.len(), 5);
+        assert_eq!(aliaspref.to_string(), "Rn == '11111' && UInt(imms) < UInt(immr)");
+    }
+
+    #[test]
+    fn test_multiarg_call_in_aliaspref() {
+        let xml = "<aliaspref>Rn == '11111' &amp;&amp; !<a link=\"impl-aarch64.MoveWidePreferred.4\" file=\"shared_pseudocode.xml\" hover=\"function: boolean MoveWidePreferred(bit sf, bit immN, bits(6) imms, bits(6) immr)\">MoveWidePreferred</a>(sf, N, imms, immr)</aliaspref>";
+        let aliaspref: AliasPref = from_str(&xml).expect("Deserialization failed");
+        assert_eq!(aliaspref.value.len(), 3);
+        assert_eq!(aliaspref.to_string(), "Rn == '11111' && !MoveWidePreferred(sf, N, imms, immr)");
     }
 
     #[test]
