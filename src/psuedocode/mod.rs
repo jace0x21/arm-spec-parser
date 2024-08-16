@@ -6,9 +6,22 @@ use nom::bytes::complete::{tag, take_while};
 use nom::combinator::peek;
 use nom::character::complete::char;
 use nom::branch::alt;
-use nom::multi::separated_list0;
-use nom::sequence::{delimited, preceded, separated_pair};
+use nom::multi::{separated_list0, separated_list1};
+use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::error::{Error, ErrorKind};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Statement {
+    Assignment(AssignmentStmt),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssignmentStmt {
+    pub quantifier: Option<Expr>,
+    pub dest_type: Option<Expr>,
+    pub dest: Box<Expr>,
+    pub src: Box<Expr>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -126,6 +139,10 @@ pub fn is_whitespace(c: char) -> bool {
 
 pub fn is_alphanumeric(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '<' || c == '>'
+}
+
+pub fn is_lexpr_atom(c: char) -> bool {
+    is_alphanumeric(c) || c == '(' || c == ')'
 }
 
 pub fn is_digit(c: char) -> bool {
@@ -325,6 +342,25 @@ pub fn expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
         current = i;
     }
     Ok((current, lhs))
+} 
+
+pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    let (i, (mut lhs_list, src)) = separated_pair(
+        separated_list1(tag(" "), term),
+        tag("= "),
+        terminated(expr, tag(";")),
+    )(code)?;
+    // seperated_list1 will always return an extra empty string at the end with 
+    // the way we use it. 
+    // TODO: Find a better solution here 
+    if lhs_list.len() < 2 {
+        return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail)));
+    }
+    lhs_list.pop();
+    let dest = Box::new(lhs_list.pop().unwrap());
+    let dest_type = lhs_list.pop();
+    let quantifier = lhs_list.pop();
+    Ok((i, Statement::Assignment(AssignmentStmt { quantifier, dest_type, dest, src: Box::new(src) })))
 }
 
 // TODO: Use custom error type
@@ -335,6 +371,16 @@ pub fn parse_expr(code: &str) -> Result<Expr, Error<Span>> {
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => Err(e),
         Err(_) => Err(Error::new(Span { input: code, min_precedence: 0 }, ErrorKind::Fail)),
     }
+}
+
+pub fn parse_stmt(code: &str) -> Result<Statement, Error<Span>> {
+    let span = Span { input: code, min_precedence: 0 };
+    match stmt(span) {
+        Ok((_i, result)) => Ok(result),
+        Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => Err(e),
+        Err(_) => Err(Error::new(Span { input: code, min_precedence: 0 }, ErrorKind::Fail)),
+    }
+    
 }
 
 mod tests {
@@ -663,6 +709,20 @@ mod tests {
             operand: Box::new(Expr::Equal(EqualOperator { 
                 left: Box::new(Expr::Identifier("S".into())), 
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })), 
+            })), 
+        }));
+    }
+
+    #[test]
+    pub fn test_stmt() {
+        let ast = parse_stmt("integer n = UInt(Rn);").unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt { 
+            quantifier: None, 
+            dest_type: Some(Expr::Identifier("integer".into())), 
+            dest: Box::new(Expr::Identifier("n".into())), 
+            src: Box::new(Expr::Call(CallExpr { 
+                identifier: Box::new(Expr::Identifier("UInt".into())), 
+                arguments: vec![Expr::Identifier("Rn".into())],
             })), 
         }));
     }
