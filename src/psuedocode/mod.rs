@@ -41,6 +41,7 @@ pub enum Expr {
     BinaryPattern(BinaryPatternExpr),
     DecimalConstant(DecimalConstantExpr),
     Call(CallExpr),
+    Type(Type)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,6 +130,14 @@ pub struct BinaryPatternExpr {
     pub value: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Type {
+    Integer,
+    Boolean,
+    BitVector(u32),
+    Complex(String),
+}
+
 pub fn not_whitespace(c: char) -> bool {
     c != ' '
 }
@@ -191,6 +200,41 @@ pub fn parens(mut code: Span) -> IResult<Span, Expr, Error<Span>> {
 
 pub fn call_arguments(code: Span) -> IResult<Span, Vec<Expr>, Error<Span>> {
     delimited(tag("("), separated_list0(tag(", "), identifier), tag(")"))(code)
+}
+
+pub fn type_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (input, value) = take_while(is_lexpr_atom)(code)?;
+    match value.input {
+        "integer" => Ok((input, Expr::Type(Type::Integer))),
+        "boolean" => Ok((input, Expr::Type(Type::Boolean))),
+        _ => {
+            match bitvector_atom(value) {
+                Ok((_, bv_atom)) => Ok((input, bv_atom)),
+                Err(e) => Err(e), 
+            }
+        }
+    }
+}
+
+pub fn bitvector_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (input, value) = preceded(
+        tag("bits"),
+        delimited(
+            tag("("), 
+            take_while(is_digit),
+            tag(")")
+        )
+    )(code)?;
+    // We unwrap here because at this point our input should be guaranteed
+    // to be parseable as a u32?
+    Ok((input, Expr::Type(Type::BitVector(value.input.parse().unwrap()))))
+}
+
+pub fn lexpr_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    alt((
+        type_atom,
+        identifier,
+    ))(code)
 }
 
 //pub fn eq(code: Span) -> IResult<Span, Expr, Error<Span>> {
@@ -346,7 +390,7 @@ pub fn expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
 
 pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, (mut lhs_list, src)) = separated_pair(
-        separated_list1(tag(" "), term),
+        separated_list1(tag(" "), lexpr_atom),
         tag("= "),
         terminated(expr, tag(";")),
     )(code)?;
@@ -718,7 +762,7 @@ mod tests {
         let ast = parse_stmt("integer n = UInt(Rn);").unwrap();
         assert_eq!(ast, Statement::Assignment(AssignmentStmt { 
             quantifier: None, 
-            dest_type: Some(Expr::Identifier("integer".into())), 
+            dest_type: Some(Expr::Type(Type::Integer)), 
             dest: Box::new(Expr::Identifier("n".into())), 
             src: Box::new(Expr::Call(CallExpr { 
                 identifier: Box::new(Expr::Identifier("UInt".into())), 
@@ -726,4 +770,12 @@ mod tests {
             })), 
         }));
     }
+
+    //#[test]
+    //pub fn test_stmt_bitvector() {
+    //    let ast = parse_stmt("bits(4) options = op2;").unwrap();
+    //    assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+    //        quantifier: None,
+    //        dest_type: Some(Expr::
+    //}
 }
