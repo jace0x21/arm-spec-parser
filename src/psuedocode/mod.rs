@@ -41,6 +41,7 @@ pub enum Expr {
     DecimalConstant(DecimalConstantExpr),
     SpecialRegister(SpecialRegisterExpr),
     Call(CallExpr),
+    MemAccess(MemAccessExpr),
     Type(Type)
 }
 
@@ -112,6 +113,13 @@ pub struct BinaryExpr {
 pub struct CallExpr {
     pub identifier: Box<Expr>,
     pub arguments: Vec<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemAccessExpr {
+    pub address: Box<Expr>,
+    pub size: Box<Expr>,
+    pub access_descriptor: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -264,9 +272,29 @@ pub fn bitvector_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((input, Expr::Type(Type::BitVector(value.input.parse().unwrap()))))
 }
 
+pub fn mem_access(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (i, mut atom_list) = delimited(
+        tag("Mem["),
+        separated_list1(tag(", "), expr),
+        tag("]"),
+    )(code)?;
+    if atom_list.len() != 3 {
+        return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail)));
+    }
+    let access_descriptor = Box::new(atom_list.pop().unwrap());
+    let size = Box::new(atom_list.pop().unwrap());
+    let address = Box::new(atom_list.pop().unwrap());
+    Ok((i, Expr::MemAccess(MemAccessExpr {
+        address,
+        size,
+        access_descriptor,
+    })))
+}
+
 pub fn lexpr_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
         special_register,
+        mem_access,
         type_atom,
         identifier,
     ))(code)
@@ -293,6 +321,7 @@ pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
             binary_constant,
             decimal_constant,
             special_register,
+            mem_access,
             identifier,
         )),
     )(code)
@@ -869,6 +898,23 @@ mod tests {
             quantifier: None,
             var_type: Box::new(Expr::Type(Type::BitVector(64))),
             identifier: Box::new(Expr::Identifier("address".into())),
+        }));
+    }
+
+    #[test]
+    pub fn test_mem_access() {
+        let ast = parse_stmt("data = Mem[address, 2, accdesc];").unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+            quantifier: None,
+            dest_type: None,
+            dest: Box::new(Expr::Identifier("data".into())),
+            src: Box::new(Expr::MemAccess(MemAccessExpr {
+                address: Box::new(Expr::Identifier("address".into())),
+                size: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                    value: 2
+                })),
+                access_descriptor: Box::new(Expr::Identifier("accdesc".into())),
+            })),
         }));
     }
 }
