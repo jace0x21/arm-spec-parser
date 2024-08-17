@@ -25,17 +25,8 @@ pub struct AssignmentStmt {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
-    Add(AddOperator),
+    Binary(BinaryExpr),
     Not(NotOperator),
-    Equal(EqualOperator),
-    NotEqual(NotEqualOperator),
-    In(InOperator),
-    LessThan(LessThanOperator),
-    GreaterThan(GreaterThanOperator),
-    LessThanEqual(LessThanEqualOperator),
-    GreaterThanEqual(GreaterThanEqualOperator),
-    And(AndOperator),
-    Or(OrOperator),
     Identifier(String),
     BinaryConstant(BinaryConstantExpr),
     BinaryPattern(BinaryPatternExpr),
@@ -46,7 +37,59 @@ pub enum Expr {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AddOperator {
+pub enum BinaryOperator {
+    Add,
+    Equal,
+    NotEqual,
+    In,
+    LessThan,
+    GreaterThan,
+    LessThanEqual,
+    GreaterThanEqual,
+    LogicalAnd,
+    LogicalOr,
+}
+
+impl BinaryOperator {
+    fn precedence(&self) -> u32 {
+        match self {
+            BinaryOperator::In => 7,
+            BinaryOperator::Add => 3,
+            BinaryOperator::Equal 
+            | BinaryOperator::NotEqual
+            | BinaryOperator::LessThan
+            | BinaryOperator::GreaterThan
+            | BinaryOperator::LessThanEqual
+            | BinaryOperator::GreaterThanEqual => 2,
+            BinaryOperator::LogicalOr 
+            | BinaryOperator::LogicalAnd => 1,
+        }
+    }
+}
+
+impl TryFrom<&str> for BinaryOperator {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.trim() {
+            "IN" => Ok(BinaryOperator::In),
+            "==" => Ok(BinaryOperator::Equal),
+            "!=" => Ok(BinaryOperator::NotEqual),
+            ">" => Ok(BinaryOperator::GreaterThan),
+            "<" => Ok(BinaryOperator::LessThan),
+            ">=" => Ok(BinaryOperator::GreaterThanEqual),
+            "<=" => Ok(BinaryOperator::LessThanEqual),
+            "+" => Ok(BinaryOperator::Add),
+            "||" => Ok(BinaryOperator::LogicalOr),
+            "&&" => Ok(BinaryOperator::LogicalAnd),
+            _ => Err("Invalid operator")
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BinaryExpr {
+    pub op: BinaryOperator,
     pub left: Box<Expr>,
     pub right: Box<Expr>,
 }
@@ -58,62 +101,8 @@ pub struct CallExpr {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct EqualOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct NotEqualOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct LessThanOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct GreaterThanOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct LessThanEqualOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct GreaterThanEqualOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OrOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AndOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct NotOperator {
     pub operand: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct InOperator {
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -306,7 +295,7 @@ pub fn not_term(mut code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((i, Expr::Not(NotOperator { operand: Box::new(expr) })))
 }
 
-pub fn operator(code: Span) -> IResult<Span, &str, Error<Span>> {
+pub fn binary_operator(code: Span) -> IResult<Span, BinaryOperator, Error<Span>> {
     let (i, span) = alt((
         tag(" == "),
         tag(" != "),
@@ -319,100 +308,35 @@ pub fn operator(code: Span) -> IResult<Span, &str, Error<Span>> {
         tag(" <= "),
         tag(" + "),
     ))(code)?;
-    Ok((i, span.input))
+    // TODO: Remove unwrap? Unsure how safe it is to assume
+    // this won't panic
+    Ok((i, span.input.try_into().unwrap()))
 }
 
-pub fn precedence_for(op: &str) -> u32 {
-    match op {
-        " && " | " || " => 1,
-        " == " | " != " | " IN " | " > " | " < " | " >= " | " <= " => 2,
-        " + " => 3,
-        _ => 0, 
-    }
-}
-
-pub fn build_expr(op: &str, lhs: Expr, rhs: Expr) -> Expr {
-    match op {
-        " == " => Expr::Equal(
-            EqualOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " && " => Expr::And(
-            AndOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " || " => Expr::Or(
-            OrOperator { 
-                left: Box::new(lhs),
-                right: Box::new(rhs),
-            }
-        ),
-        " != " => Expr::NotEqual(
-            NotEqualOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " IN " => Expr::In(
-            InOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " > " => Expr::GreaterThan(
-            GreaterThanOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " < " => Expr::LessThan(
-            LessThanOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " >= " => Expr::GreaterThanEqual(
-            GreaterThanEqualOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " <= " => Expr::LessThanEqual(
-            LessThanEqualOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        " + " => Expr::Add(
-            AddOperator { 
-                left: Box::new(lhs), 
-                right: Box::new(rhs), 
-            }
-        ),
-        _ => Expr::Identifier("ERROR".into()),
-    }
+pub fn build_expr(op: BinaryOperator, lhs: Expr, rhs: Expr) -> Expr {
+    Expr::Binary(BinaryExpr {
+        op,
+        left: Box::new(lhs),
+        right: Box::new(rhs),
+    })
 }
 
 pub fn expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (i, mut lhs) = term(code)?;
     let mut current = i;
     loop {
-        let (i, op) = match peek(operator)(current) {
+        let (i, op) = match peek(binary_operator)(current) {
             Ok(res) => res,
             Err(nom::Err::Error(e)) => { current = e.input; break; },
             Err(e) => return Err(e),
         };
-        if precedence_for(op) < i.min_precedence {
+        if op.precedence() < i.min_precedence {
             current = i;
             break;
         }
-        let (mut i, op) = operator(i)?;
+        let (mut i, op) = binary_operator(i)?;
         let prev_precedence = i.min_precedence;
-        i.min_precedence = precedence_for(op) + 1;
+        i.min_precedence = op.precedence() + 1;
         let (mut i, rhs) = expr(i)?;
         i.min_precedence = prev_precedence;
         lhs = build_expr(op, lhs, rhs); 
@@ -472,7 +396,8 @@ mod tests {
     #[test]
     pub fn test_eq_statement() {
         let ast = parse_expr("Ra == '11111'").unwrap();
-        assert_eq!(ast, Expr::Equal(EqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::Equal,
             left: Box::new(Expr::Identifier("Ra".into())),
             right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
         }));
@@ -481,12 +406,15 @@ mod tests {
     #[test]
     pub fn test_precedence() {
         let ast = parse_expr("A == '0' && Rt == '11111'").unwrap();
-        assert_eq!(ast, Expr::And(AndOperator {
-            left: Box::new(Expr::Equal(EqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LogicalAnd,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("A".into())),
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() }))
             })),
-            right: Box::new(Expr::Equal(EqualOperator {
+            right: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("Rt".into())),
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
             })),
@@ -496,7 +424,8 @@ mod tests {
     #[test]
     pub fn test_ne_statement() {
         let ast = parse_expr("Rd != '11111'").unwrap();
-        assert_eq!(ast, Expr::NotEqual(NotEqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::NotEqual,
             left: Box::new(Expr::Identifier("Rd".into())),
             right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
         }));
@@ -539,7 +468,8 @@ mod tests {
     #[test]
     pub fn test_in() {
         let ast = parse_expr("cond IN {'111x'}").unwrap();
-        assert_eq!(ast, Expr::In(InOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::In,
             left: Box::new(Expr::Identifier("cond".into())),
             right: Box::new(Expr::BinaryPattern(BinaryPatternExpr { value: "111x".into() })),
         }));
@@ -548,7 +478,8 @@ mod tests {
     #[test]
     pub fn test_gt() {
         let ast = parse_expr("imms > immr").unwrap();
-        assert_eq!(ast, Expr::GreaterThan(GreaterThanOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::GreaterThan,
             left: Box::new(Expr::Identifier("imms".into())),
             right: Box::new(Expr::Identifier("immr".into())),
         }));
@@ -557,7 +488,8 @@ mod tests {
     #[test]
     pub fn test_lt() {
         let ast = parse_expr("imms < immr").unwrap();
-        assert_eq!(ast, Expr::LessThan(LessThanOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LessThan,
             left: Box::new(Expr::Identifier("imms".into())),
             right: Box::new(Expr::Identifier("immr".into())),
         }));
@@ -566,7 +498,8 @@ mod tests {
     #[test]
     pub fn test_gte() {
         let ast = parse_expr("imms >= immr").unwrap();
-        assert_eq!(ast, Expr::GreaterThanEqual(GreaterThanEqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::GreaterThanEqual,
             left: Box::new(Expr::Identifier("imms".into())),
             right: Box::new(Expr::Identifier("immr".into())),
         }));
@@ -575,7 +508,8 @@ mod tests {
     #[test]
     pub fn test_lte() {
         let ast = parse_expr("imms <= immr").unwrap();
-        assert_eq!(ast, Expr::LessThanEqual(LessThanEqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LessThanEqual,
             left: Box::new(Expr::Identifier("imms".into())),
             right: Box::new(Expr::Identifier("immr".into())),
         }));
@@ -584,7 +518,8 @@ mod tests {
     #[test]
     pub fn test_compare_calls_leading_whitespace() {
         let ast = parse_expr("UInt (imms) < UInt (immr)").unwrap();
-        assert_eq!(ast, Expr::LessThan(LessThanOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LessThan,
             left: Box::new(Expr::Call(CallExpr { 
                 identifier: Box::new(Expr::Identifier("UInt".into())), 
                 arguments: vec![Expr::Identifier("imms".into())], 
@@ -599,7 +534,8 @@ mod tests {
     #[test]
     pub fn test_compare_calls() {
         let ast = parse_expr("UInt(imms) < UInt(immr)").unwrap();
-        assert_eq!(ast, Expr::LessThan(LessThanOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LessThan,
             left: Box::new(Expr::Call(CallExpr { 
                 identifier: Box::new(Expr::Identifier("UInt".into())), 
                 arguments: vec![Expr::Identifier("imms".into())], 
@@ -620,7 +556,8 @@ mod tests {
     #[test]
     pub fn test_add() {
         let ast = parse_expr("1 + 1").unwrap();
-        assert_eq!(ast, Expr::Add(AddOperator { 
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::Add,
             left: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })), 
             right: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })),
         }));
@@ -629,8 +566,10 @@ mod tests {
     #[test]
     pub fn test_right_heavy() {
         let ast = parse_expr("Rn == '11111' && ! MoveWidePreferred (sf, N, imms, immr)").unwrap();
-        assert_eq!(ast, Expr::And(AndOperator {
-            left: Box::new(Expr::Equal(EqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LogicalAnd,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("Rn".into())),
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
             })),
@@ -651,8 +590,10 @@ mod tests {
     #[test]
     pub fn test_add_comparison() {
         let ast = parse_expr("UInt (imms) + 1 == UInt (immr)").unwrap();
-        assert_eq!(ast, Expr::Equal(EqualOperator { 
-            left: Box::new(Expr::Add(AddOperator { 
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Add,
                 left: Box::new(Expr::Call(CallExpr { 
                     identifier: Box::new(Expr::Identifier("UInt".into())), 
                     arguments: vec![Expr::Identifier("imms".into())], 
@@ -669,13 +610,17 @@ mod tests {
     #[test]
     pub fn test_complex_comparison() {
         let ast = parse_expr("imms != '011111' && UInt (imms) + 1 == UInt (immr)").unwrap();
-        assert_eq!(ast, Expr::And(AndOperator {
-            left: Box::new(Expr::NotEqual(NotEqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LogicalAnd,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::NotEqual,
                 left: Box::new(Expr::Identifier("imms".into())),
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "011111".into() })),
             })),
-            right: Box::new(Expr::Equal(EqualOperator { 
-                left: Box::new(Expr::Add(AddOperator { 
+            right: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Add,
                     left: Box::new(Expr::Call(CallExpr { 
                         identifier: Box::new(Expr::Identifier("UInt".into())), 
                         arguments: vec![Expr::Identifier("imms".into())], 
@@ -693,18 +638,23 @@ mod tests {
     #[test]
     pub fn test_and_left_associative() {
         let ast = parse_expr("imms == '1' && immr == '1' && S == '1'").unwrap();
-        assert_eq!(ast, Expr::And(AndOperator {
-            left: Box::new(Expr::And(AndOperator {
-                left: Box::new(Expr::Equal(EqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LogicalAnd,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::LogicalAnd,
+                left: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("imms".into())),
                     right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
                 })),
-                right: Box::new(Expr::Equal(EqualOperator {
+                right: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("immr".into())),
                     right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
                 })),
             })),
-            right: Box::new(Expr::Equal(EqualOperator {
+            right: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("S".into())),
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
             })),
@@ -714,7 +664,8 @@ mod tests {
     #[test]
     pub fn test_parens() {
         let ast = parse_expr("(Rn == '1')").unwrap();
-        assert_eq!(ast, Expr::Equal(EqualOperator {
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::Equal,
             left: Box::new(Expr::Identifier("Rn".into())),
             right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() }))
         }));
@@ -723,17 +674,22 @@ mod tests {
     #[test]
     pub fn test_parens_precedence() {
         let ast = parse_expr("sh == '0' && (Rd == '1' || Rn == '1')").unwrap();
-        assert_eq!(ast, Expr::And(AndOperator {
-            left: Box::new(Expr::Equal(EqualOperator { 
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LogicalAnd,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("sh".into())), 
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() })),
             })),
-            right: Box::new(Expr::Or(OrOperator {
-                left: Box::new(Expr::Equal(EqualOperator { 
+            right: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::LogicalOr,
+                left: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("Rd".into())), 
                     right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
                 })),
-                right: Box::new(Expr::Equal(EqualOperator { 
+                right: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("Rn".into())), 
                     right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
                 })),
@@ -744,18 +700,23 @@ mod tests {
     #[test]
     pub fn test_mixed_ops_left_associative() {
         let ast = parse_expr("sh == '0' && Rd == '1' || Rn == '1'").unwrap();
-        assert_eq!(ast, Expr::Or(OrOperator {
-            left: Box::new(Expr::And(AndOperator {
-                left: Box::new(Expr::Equal(EqualOperator { 
+        assert_eq!(ast, Expr::Binary(BinaryExpr {
+            op: BinaryOperator::LogicalOr,
+            left: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::LogicalAnd,
+                left: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("sh".into())), 
                     right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() })),
                 })),
-                right: Box::new(Expr::Equal(EqualOperator { 
+                right: Box::new(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("Rd".into())), 
                     right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
                 })),
             })),
-            right: Box::new(Expr::Equal(EqualOperator { 
+            right: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("Rn".into())), 
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
             })),
@@ -783,7 +744,8 @@ mod tests {
     pub fn test_not_expr() {
         let ast = parse_expr("!( S == '1')").unwrap();
         assert_eq!(ast, Expr::Not(NotOperator { 
-            operand: Box::new(Expr::Equal(EqualOperator { 
+            operand: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("S".into())), 
                 right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })), 
             })), 
