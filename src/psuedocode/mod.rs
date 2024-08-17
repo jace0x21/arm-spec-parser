@@ -39,7 +39,7 @@ pub enum Expr {
     BinaryConstant(BinaryConstantExpr),
     BinaryPattern(BinaryPatternExpr),
     DecimalConstant(DecimalConstantExpr),
-    SpecialRegister(SpecialRegisterExpr),
+    Register(RegisterExpr),
     Call(CallExpr),
     MemAccess(MemAccessExpr),
     Type(Type)
@@ -143,10 +143,9 @@ pub struct BinaryPatternExpr {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SpecialRegisterExpr {
+pub struct RegisterExpr {
     pub identifier: String,
-    pub start: String,
-    pub end: String,
+    pub arguments: Vec<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -202,24 +201,24 @@ pub fn binary_pattern(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((input, Expr::BinaryPattern(BinaryPatternExpr { value: constant.input.into() })))
 }
 
-pub fn special_register(code: Span) -> IResult<Span, Expr, Error<Span>> {
-    let (i, (identifier, (start, end))) = separated_pair(take_while(is_alphanumeric), take_while(is_whitespace), sr_range)(code)?;
-    Ok((i, Expr::SpecialRegister(
-        SpecialRegisterExpr { 
-            identifier: identifier.input.into(),
-            start: start.input.into(),
-            end: end.input.into(),
-        }
-    )))
+pub fn register(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (i, (identifier, arguments)) = separated_pair(
+        take_while(is_alphanumeric),
+        take_while(is_whitespace),
+        register_arguments,
+    )(code)?;
+    Ok((i, Expr::Register(RegisterExpr { 
+        identifier: identifier.input.into(),
+        arguments,
+    })))
 }
 
-pub fn sr_range(code: Span) -> IResult<Span, (Span, Span), Error<Span>> {
+pub fn register_arguments(code: Span) -> IResult<Span, Vec<Expr>, Error<Span>> {
     delimited(
         tag("["),
-        separated_pair(
-            take_while(is_alphanumeric),
+        separated_list0(
             tag(", "),
-            take_while(is_alphanumeric),
+            expr,
         ),
         tag("]")
     )(code)
@@ -293,8 +292,8 @@ pub fn mem_access(code: Span) -> IResult<Span, Expr, Error<Span>> {
 
 pub fn lexpr_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
-        special_register,
         mem_access,
+        register,
         type_atom,
         identifier,
     ))(code)
@@ -320,8 +319,8 @@ pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
             binary_pattern,
             binary_constant,
             decimal_constant,
-            special_register,
             mem_access,
+            register,
             identifier,
         )),
     )(code)
@@ -854,10 +853,14 @@ mod tests {
             quantifier: None,
             dest_type: None,
             dest: Box::new(Expr::Identifier("address".into())),
-            src: Box::new(Expr::SpecialRegister(SpecialRegisterExpr {
+            src: Box::new(Expr::Register(RegisterExpr {
                 identifier: "X".into(),
-                start: "n".into(),
-                end: "64".into(),
+                arguments: vec![
+                    Expr::Identifier("n".into()),
+                    Expr::DecimalConstant(DecimalConstantExpr {
+                        value: 64
+                    }),
+                ],
             })),
         }));
 
@@ -865,10 +868,14 @@ mod tests {
         assert_eq!(lexpr_ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: None,
-            dest: Box::new(Expr::SpecialRegister(SpecialRegisterExpr {
+            dest: Box::new(Expr::Register(RegisterExpr {
                 identifier: "X".into(),
-                start: "s".into(),
-                end: "32".into(),
+                arguments: vec![
+                    Expr::Identifier("s".into()),
+                    Expr::DecimalConstant(DecimalConstantExpr {
+                        value: 32,
+                    }),
+                ],
             })),
             src: Box::new(Expr::Identifier("n".into())),
         }));
