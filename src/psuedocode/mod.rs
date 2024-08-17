@@ -40,6 +40,7 @@ pub enum Expr {
     BinaryConstant(BinaryConstantExpr),
     BinaryPattern(BinaryPatternExpr),
     DecimalConstant(DecimalConstantExpr),
+    SpecialRegister(SpecialRegisterExpr),
     Call(CallExpr),
     Type(Type)
 }
@@ -131,6 +132,13 @@ pub struct BinaryPatternExpr {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct SpecialRegisterExpr {
+    pub identifier: String,
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Integer,
     Boolean,
@@ -183,6 +191,29 @@ pub fn binary_pattern(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((input, Expr::BinaryPattern(BinaryPatternExpr { value: constant.input.into() })))
 }
 
+pub fn special_register(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (i, (identifier, (start, end))) = separated_pair(take_while(is_alphanumeric), take_while(is_whitespace), sr_range)(code)?;
+    Ok((i, Expr::SpecialRegister(
+        SpecialRegisterExpr { 
+            identifier: identifier.input.into(),
+            start: start.input.into(),
+            end: end.input.into(),
+        }
+    )))
+}
+
+pub fn sr_range(code: Span) -> IResult<Span, (Span, Span), Error<Span>> {
+    delimited(
+        tag("["),
+        separated_pair(
+            take_while(is_alphanumeric),
+            tag(", "),
+            take_while(is_alphanumeric),
+        ),
+        tag("]")
+    )(code)
+}
+
 pub fn call(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (i, (identifier, arguments)) = separated_pair(identifier, take_while(is_whitespace), call_arguments)(code)?;
     Ok((i, Expr::Call(CallExpr { identifier: Box::new(identifier), arguments })))
@@ -232,6 +263,7 @@ pub fn bitvector_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
 
 pub fn lexpr_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
+        special_register,
         type_atom,
         identifier,
     ))(code)
@@ -257,6 +289,7 @@ pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
             binary_pattern,
             binary_constant,
             decimal_constant,
+            special_register,
             identifier,
         )),
     )(code)
@@ -771,11 +804,41 @@ mod tests {
         }));
     }
 
-    //#[test]
-    //pub fn test_stmt_bitvector() {
-    //    let ast = parse_stmt("bits(4) options = op2;").unwrap();
-    //    assert_eq!(ast, Statement::Assignment(AssignmentStmt {
-    //        quantifier: None,
-    //        dest_type: Some(Expr::
-    //}
+    #[test]
+    pub fn test_stmt_bitvector() {
+        let ast = parse_stmt("bits(4) options = op2;").unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+            quantifier: None,
+            dest_type: Some(Expr::Type(Type::BitVector(4))),
+            dest: Box::new(Expr::Identifier("options".into())),
+            src: Box::new(Expr::Identifier("op2".into())),
+        }));
+    }
+
+    #[test]
+    pub fn test_special_register() {
+        let ast = parse_stmt("address = X[n, 64];").unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+            quantifier: None,
+            dest_type: None,
+            dest: Box::new(Expr::Identifier("address".into())),
+            src: Box::new(Expr::SpecialRegister(SpecialRegisterExpr {
+                identifier: "X".into(),
+                start: "n".into(),
+                end: "64".into(),
+            })),
+        }));
+
+        let lexpr_ast = parse_stmt("X[s, 32] = n;").unwrap();
+        assert_eq!(lexpr_ast, Statement::Assignment(AssignmentStmt {
+            quantifier: None,
+            dest_type: None,
+            dest: Box::new(Expr::SpecialRegister(SpecialRegisterExpr {
+                identifier: "X".into(),
+                start: "s".into(),
+                end: "32".into(),
+            })),
+            src: Box::new(Expr::Identifier("n".into())),
+        }));
+    }
 }
