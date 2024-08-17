@@ -13,6 +13,7 @@ use nom::error::{Error, ErrorKind};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     Assignment(AssignmentStmt),
+    Decl(DeclStmt),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,6 +22,13 @@ pub struct AssignmentStmt {
     pub dest_type: Option<Expr>,
     pub dest: Box<Expr>,
     pub src: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclStmt {
+    pub quantifier: Option<Expr>,
+    pub var_type: Box<Expr>,
+    pub identifier: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,6 +47,8 @@ pub enum Expr {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BinaryOperator {
     Add,
+    LeftShift,
+    RightShift,
     Equal,
     NotEqual,
     In,
@@ -54,6 +64,8 @@ impl BinaryOperator {
     fn precedence(&self) -> u32 {
         match self {
             BinaryOperator::In => 7,
+            BinaryOperator::LeftShift
+            | BinaryOperator::RightShift => 4,
             BinaryOperator::Add => 3,
             BinaryOperator::Equal 
             | BinaryOperator::NotEqual
@@ -80,6 +92,8 @@ impl TryFrom<&str> for BinaryOperator {
             ">=" => Ok(BinaryOperator::GreaterThanEqual),
             "<=" => Ok(BinaryOperator::LessThanEqual),
             "+" => Ok(BinaryOperator::Add),
+            "<<" => Ok(BinaryOperator::LeftShift),
+            ">>" => Ok(BinaryOperator::RightShift),
             "||" => Ok(BinaryOperator::LogicalOr),
             "&&" => Ok(BinaryOperator::LogicalAnd),
             _ => Err("Invalid operator")
@@ -307,6 +321,8 @@ pub fn binary_operator(code: Span) -> IResult<Span, BinaryOperator, Error<Span>>
         tag(" >= "),
         tag(" <= "),
         tag(" + "),
+        tag(" << "),
+        tag(" >> "),
     ))(code)?;
     // TODO: Remove unwrap? Unsure how safe it is to assume
     // this won't panic
@@ -343,9 +359,27 @@ pub fn expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
         current = i;
     }
     Ok((current, lhs))
-} 
+}
 
-pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
+pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    let (i, mut atom_list) = terminated(
+        separated_list1(tag(" "), lexpr_atom),
+        tag(";"),
+    )(code)?;
+    if atom_list.len() < 2 {
+        return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail)));
+    }
+    let identifier = Box::new(atom_list.pop().unwrap());
+    let var_type = Box::new(atom_list.pop().unwrap());
+    let quantifier = atom_list.pop();
+    Ok((i, Statement::Decl(DeclStmt {
+        quantifier,
+        var_type,
+        identifier,
+    })))
+}
+
+pub fn assign(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, (mut lhs_list, src)) = separated_pair(
         separated_list1(tag(" "), lexpr_atom),
         tag("= "),
@@ -362,6 +396,13 @@ pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let dest_type = lhs_list.pop();
     let quantifier = lhs_list.pop();
     Ok((i, Statement::Assignment(AssignmentStmt { quantifier, dest_type, dest, src: Box::new(src) })))
+}
+
+pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    alt((
+        assign,
+        decl,
+    ))(code)
 }
 
 // TODO: Use custom error type
@@ -801,6 +842,33 @@ mod tests {
                 end: "32".into(),
             })),
             src: Box::new(Expr::Identifier("n".into())),
+        }));
+    }
+
+    #[test]
+    pub fn test_shift_left() {
+        let ast = parse_stmt("constant integer datasize = 8 << scale;").unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+            quantifier: Some(Expr::Identifier("constant".into())),
+            dest_type: Some(Expr::Type(Type::Integer)),
+            dest: Box::new(Expr::Identifier("datasize".into())),
+            src: Box::new(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::LeftShift,
+                left: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                    value: 8,
+                })),
+                right: Box::new(Expr::Identifier("scale".into())),
+            })),
+        }));
+    }
+
+    #[test]
+    pub fn test_decl() {
+        let ast = parse_stmt("bits(64) address;").unwrap();
+        assert_eq!(ast, Statement::Decl(DeclStmt {
+            quantifier: None,
+            var_type: Box::new(Expr::Type(Type::BitVector(64))),
+            identifier: Box::new(Expr::Identifier("address".into())),
         }));
     }
 }
