@@ -2,7 +2,7 @@ pub mod span;
 use span::Span;
 
 use nom::IResult;
-use nom::bytes::complete::{tag, take_while};
+use nom::bytes::complete::{tag, take_while, take_while1};
 use nom::combinator::peek;
 use nom::character::complete::char;
 use nom::branch::alt;
@@ -177,7 +177,7 @@ pub fn is_digit(c: char) -> bool {
 }
 
 pub fn identifier(code: Span) -> IResult<Span, Expr, Error<Span>> {
-    let (input, value) = take_while(is_alphanumeric)(code)?;
+    let (input, value) = take_while1(is_alphanumeric)(code)?;
     Ok((input, Expr::Identifier(value.input.into())))
 }
 
@@ -410,16 +410,12 @@ pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
 pub fn assign(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, (mut lhs_list, src)) = separated_pair(
         separated_list1(tag(" "), lexpr_atom),
-        tag("= "),
+        tag(" = "),
         terminated(expr, tag(";")),
     )(code)?;
-    // seperated_list1 will always return an extra empty string at the end with 
-    // the way we use it. 
-    // TODO: Find a better solution here 
-    if lhs_list.len() < 2 {
+    if lhs_list.len() < 1 {
         return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail)));
     }
-    lhs_list.pop();
     let dest = Box::new(lhs_list.pop().unwrap());
     let dest_type = lhs_list.pop();
     let quantifier = lhs_list.pop();
@@ -847,7 +843,32 @@ mod tests {
     }
 
     #[test]
-    pub fn test_special_register() {
+    pub fn test_sp_register() {
+        let ast = parse_stmt("address = SP[];").unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+            quantifier: None,
+            dest_type: None,
+            dest: Box::new(Expr::Identifier("address".into())),
+            src: Box::new(Expr::Register(RegisterExpr {
+                identifier: "SP".into(),
+                arguments: vec![],
+            })),
+        }));
+
+        let lexpr_ast = parse_stmt("SP[] = address;").unwrap();
+        assert_eq!(lexpr_ast, Statement::Assignment(AssignmentStmt {
+            quantifier: None,
+            dest_type: None,
+            dest: Box::new(Expr::Register(RegisterExpr {
+                identifier: "SP".into(),
+                arguments: vec![],
+            })),
+            src: Box::new(Expr::Identifier("address".into())),
+        }));
+    }
+
+    #[test]
+    pub fn test_gp_register() {
         let ast = parse_stmt("address = X[n, 64];").unwrap();
         assert_eq!(ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
