@@ -6,14 +6,33 @@ use nom::bytes::complete::{tag, take_while, take_while1};
 use nom::combinator::peek;
 use nom::character::complete::char;
 use nom::branch::alt;
-use nom::multi::{separated_list0, separated_list1};
+use nom::multi::{many1, separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::error::{Error, ErrorKind};
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConditionalStmt {
+    blocks: Vec<ConditionalBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Condition {
+    If(Expr),
+    ElseIf(Expr),
+    Else,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConditionalBlock {
+    condition: Condition,
+    block: Vec<Statement>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     Assignment(AssignmentStmt),
     Decl(DeclStmt),
+    Conditional(ConditionalStmt),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -389,6 +408,61 @@ pub fn expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((current, lhs))
 }
 
+pub fn if_cond(code: Span) -> IResult<Span, Condition, Error<Span>> {
+    let (i, cond_expr) = delimited(
+        tag("if "),
+        expr,
+        tag(" then"),
+    )(code)?;
+    Ok((i, Condition::If(cond_expr)))
+}
+
+pub fn else_if_cond(code: Span) -> IResult<Span, Condition, Error<Span>> {
+    let (i, cond_expr) = delimited(
+        tag("else if "),
+        expr,
+        tag(" then"),
+    )(code)?;
+    Ok((i, Condition::ElseIf(cond_expr)))
+}
+
+pub fn else_cond(code: Span) -> IResult<Span, Condition, Error<Span>> {
+    let (i, _) = tag("else")(code)?;
+    Ok((i, Condition::Else))
+}
+
+pub fn condition(code: Span) -> IResult<Span, Condition, Error<Span>> {
+    alt((
+        if_cond,
+        else_if_cond,
+        else_cond,
+    ))(code)
+}
+
+pub fn indented_stmt(code: Span) ->IResult<Span, Statement, Error<Span>> {
+    preceded(
+        tag("    "),
+        stmt,
+    )(code)
+}
+
+pub fn if_block(code: Span) -> IResult<Span, ConditionalBlock, Error<Span>> {
+    let (i, (condition, block)) = separated_pair(
+        condition,
+        tag("\n"),
+        separated_list1(
+            tag("\n"),
+            indented_stmt,
+        ),
+    )(code)?;
+    Ok((i, ConditionalBlock{ condition, block }))
+}
+
+pub fn condition_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    let (i, blocks) = separated_list1(tag("\n"), if_block)(code)?;
+    Ok((i, Statement::Conditional(ConditionalStmt { blocks })))
+}
+
 pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, mut atom_list) = terminated(
         separated_list1(tag(" "), lexpr_atom),
@@ -424,6 +498,7 @@ pub fn assign(code: Span) -> IResult<Span, Statement, Error<Span>> {
 
 pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     alt((
+        condition_stmt,
         assign,
         decl,
     ))(code)
@@ -943,6 +1018,134 @@ mod tests {
                 })),
                 access_descriptor: Box::new(Expr::Identifier("accdesc".into())),
             })),
+        }));
+    }
+
+    #[test] 
+    pub fn test_if_block() {
+        let ast = parse_stmt("if n == 31 then\n    \
+            address = SP[];\n"
+        ).unwrap();
+        assert_eq!(ast, Statement::Conditional(ConditionalStmt {
+            blocks: vec![ConditionalBlock {
+                condition: Condition::If(Expr::Binary(BinaryExpr {
+                    op: BinaryOperator::Equal,
+                    left: Box::new(Expr::Identifier("n".into())),
+                    right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                        value: 31,
+                    })),
+                })),
+                block: vec![
+                    Statement::Assignment(AssignmentStmt {
+                        quantifier: None,
+                        dest_type: None,
+                        dest: Box::new(Expr::Identifier("address".into())),
+                        src: Box::new(Expr::Register(RegisterExpr {
+                            identifier: "SP".into(),
+                            arguments: vec![],
+                        })),
+                    })
+                ],
+            }],
+        }))
+    }
+
+    #[test] 
+    pub fn test_else_if_block() {
+        let ast = parse_stmt("if n == 31 then\n    \
+            address = SP[];\n\
+            else if n == 30 then\n    \
+            address = SP[];\n"
+        ).unwrap();
+        assert_eq!(ast, Statement::Conditional(ConditionalStmt {
+            blocks: vec![
+                ConditionalBlock {
+                    condition: Condition::If(Expr::Binary(BinaryExpr {
+                        op: BinaryOperator::Equal,
+                        left: Box::new(Expr::Identifier("n".into())),
+                        right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                            value: 31
+                        })),
+                    })),
+                    block: vec![
+                        Statement::Assignment(AssignmentStmt {
+                            quantifier: None,
+                            dest_type: None,
+                            dest: Box::new(Expr::Identifier("address".into())),
+                            src: Box::new(Expr::Register(RegisterExpr {
+                                identifier: "SP".into(),
+                                arguments: vec![],
+                            })),
+                        }),
+                    ],
+                },
+                ConditionalBlock {
+                    condition: Condition::ElseIf(Expr::Binary(BinaryExpr {
+                        op: BinaryOperator::Equal,
+                        left: Box::new(Expr::Identifier("n".into())),
+                        right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                            value: 30,
+                        })),
+                    })),
+                    block: vec![
+                        Statement::Assignment(AssignmentStmt {
+                            quantifier: None,
+                            dest_type: None,
+                            dest: Box::new(Expr::Identifier("address".into())),
+                            src: Box::new(Expr::Register(RegisterExpr {
+                                identifier: "SP".into(),
+                                arguments: vec![],
+                            })),
+                        }),
+                    ]
+                }
+            ]
+        }));
+    }
+
+    #[test]
+    pub fn test_else_block() {
+        let ast = parse_stmt("if n == 31 then\n    \
+            address = SP[];\n\
+            else\n    \
+            address = 0;\n"
+        ).unwrap();
+        assert_eq!(ast, Statement::Conditional(ConditionalStmt {
+            blocks: vec![
+                ConditionalBlock {
+                    condition: Condition::If(Expr::Binary(BinaryExpr {
+                        op: BinaryOperator::Equal,
+                        left: Box::new(Expr::Identifier("n".into())),
+                        right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                            value: 31,
+                        })),
+                    })),
+                    block: vec![
+                        Statement::Assignment(AssignmentStmt {
+                            quantifier: None,
+                            dest_type: None,
+                            dest: Box::new(Expr::Identifier("address".into())),
+                            src: Box::new(Expr::Register(RegisterExpr {
+                                identifier: "SP".into(),
+                                arguments: vec![],
+                            })),
+                        }),
+                    ]
+                },
+                ConditionalBlock {
+                    condition: Condition::Else,
+                    block: vec![
+                        Statement::Assignment(AssignmentStmt {
+                            quantifier: None,
+                            dest_type: None,
+                            dest: Box::new(Expr::Identifier("address".into())),
+                            src: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                                value: 0,
+                            })),
+                        }),
+                    ]
+                },
+            ]
         }));
     }
 }
