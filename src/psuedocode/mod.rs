@@ -33,6 +33,7 @@ pub enum Statement {
     Assignment(AssignmentStmt),
     Decl(DeclStmt),
     Cond(ConditionalStmt),
+    CondDecl(ConditionalExpr),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -516,12 +517,17 @@ pub fn inline_conditional_expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
     Ok((i, Expr::Cond(conditional_expr_list)))
 }
 
+pub fn inline_conditional_decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    let (i, cond_expr) = inline_if(code)?;
+    Ok((i, Statement::CondDecl(cond_expr)))
+}
+
 pub fn condition_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, blocks) = separated_list1(tag("\n"), if_block)(code)?;
     Ok((i, Statement::Cond(ConditionalStmt { blocks })))
 }
 
-pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
+pub fn decl_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, mut atom_list) = terminated(
         separated_list1(tag(" "), lexpr_atom),
         tag(";"),
@@ -537,6 +543,13 @@ pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
         var_type,
         identifier,
     })))
+}
+
+pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    Ok(alt((
+        decl_stmt,
+        inline_conditional_decl,
+    ))(code)?)
 }
 
 pub fn assign(code: Span) -> IResult<Span, Statement, Error<Span>> {
@@ -1252,6 +1265,21 @@ mod tests {
                     })),
                 },
             ])
+        }));
+    }
+
+    #[test]
+    fn test_inline_decl() {
+        let ast = parse_stmt("if immh IN {'000x'} then UNDEFINED;").unwrap();
+        assert_eq!(ast, Statement::CondDecl(ConditionalExpr {
+            condition: Box::new(Condition::If(Expr::Binary(BinaryExpr {
+                op: BinaryOperator::In,
+                left: Box::new(Expr::Identifier("immh".into())),
+                right: Box::new(Expr::BinaryPattern(BinaryPatternExpr {
+                    value: "000x".into()
+                })),
+            }))),
+            expr: Box::new(Expr::Identifier("UNDEFINED".into())),
         }));
     }
 }
