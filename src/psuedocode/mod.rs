@@ -57,9 +57,9 @@ pub enum Expr {
     Binary(BinaryExpr),
     Not(NotOperator),
     Identifier(String),
-    BinaryConstant(BinaryConstantExpr),
-    BinaryPattern(BinaryPatternExpr),
-    DecimalConstant(DecimalConstantExpr),
+    BinaryConstant(String),
+    BinaryPattern(String),
+    DecimalConstant(u32),
     Register(RegisterExpr),
     Call(CallExpr),
     MemAccess(MemAccessExpr),
@@ -155,21 +155,6 @@ pub struct NotOperator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BinaryConstantExpr {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DecimalConstantExpr {
-    pub value: u32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BinaryPatternExpr {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct RegisterExpr {
     pub identifier: String,
     pub arguments: Vec<Expr>,
@@ -210,7 +195,7 @@ pub fn identifier(code: Span) -> IResult<Span, Expr, Error<Span>> {
 
 pub fn binary_constant(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, constant) = delimited(char('\''), take_while(is_alphanumeric), char('\''))(code)?;
-    Ok((input, Expr::BinaryConstant(BinaryConstantExpr { value: constant.input.into() })))
+    Ok((input, Expr::BinaryConstant(constant.input.into())))
 }
 
 pub fn decimal_constant(code: Span) -> IResult<Span, Expr, Error<Span>> {
@@ -220,12 +205,12 @@ pub fn decimal_constant(code: Span) -> IResult<Span, Expr, Error<Span>> {
         Ok(v) => v,
         Err(_e) => return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail))),
     };
-    Ok((i, Expr::DecimalConstant(DecimalConstantExpr { value: int_value })))
+    Ok((i, Expr::DecimalConstant(int_value)))
 }
 
 pub fn binary_pattern(code: Span) -> IResult<Span, Expr, Error<Span>> {
     let (input, constant) = delimited(tag("{'"), take_while(is_alphanumeric), tag("'}"))(code)?;
-    Ok((input, Expr::BinaryPattern(BinaryPatternExpr { value: constant.input.into() })))
+    Ok((input, Expr::BinaryPattern(constant.input.into())))
 }
 
 pub fn register(code: Span) -> IResult<Span, Expr, Error<Span>> {
@@ -612,7 +597,7 @@ mod tests {
         assert_eq!(ast, Expr::Binary(BinaryExpr {
             op: BinaryOperator::Equal,
             left: Box::new(Expr::Identifier("Ra".into())),
-            right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
+            right: Box::new(Expr::BinaryConstant("11111".into())),
         }));
     }
 
@@ -624,12 +609,12 @@ mod tests {
             left: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("A".into())),
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() }))
+                right: Box::new(Expr::BinaryConstant("0".into()))
             })),
             right: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("Rt".into())),
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
+                right: Box::new(Expr::BinaryConstant("11111".into())),
             })),
         }));
     }
@@ -640,7 +625,7 @@ mod tests {
         assert_eq!(ast, Expr::Binary(BinaryExpr {
             op: BinaryOperator::NotEqual,
             left: Box::new(Expr::Identifier("Rd".into())),
-            right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
+            right: Box::new(Expr::BinaryConstant("11111".into())),
         }));
     }
 
@@ -684,7 +669,7 @@ mod tests {
         assert_eq!(ast, Expr::Binary(BinaryExpr {
             op: BinaryOperator::In,
             left: Box::new(Expr::Identifier("cond".into())),
-            right: Box::new(Expr::BinaryPattern(BinaryPatternExpr { value: "111x".into() })),
+            right: Box::new(Expr::BinaryPattern("111x".into())),
         }));
     }
 
@@ -763,7 +748,7 @@ mod tests {
     #[test]
     pub fn test_decimal_constant() {
         let ast = parse_expr("1").unwrap();
-        assert_eq!(ast, Expr::DecimalConstant(DecimalConstantExpr { value: 1 }))
+        assert_eq!(ast, Expr::DecimalConstant(1))
     }
 
     #[test]
@@ -771,8 +756,8 @@ mod tests {
         let ast = parse_expr("1 + 1").unwrap();
         assert_eq!(ast, Expr::Binary(BinaryExpr {
             op: BinaryOperator::Add,
-            left: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })), 
-            right: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })),
+            left: Box::new(Expr::DecimalConstant(1)), 
+            right: Box::new(Expr::DecimalConstant(1)),
         }));
     }
 
@@ -784,7 +769,7 @@ mod tests {
             left: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("Rn".into())),
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "11111".into() })),
+                right: Box::new(Expr::BinaryConstant("11111".into())),
             })),
             right: Box::new(Expr::Not(NotOperator {
                 operand: Box::new(Expr::Call(CallExpr {
@@ -811,7 +796,7 @@ mod tests {
                     identifier: Box::new(Expr::Identifier("UInt".into())), 
                     arguments: vec![Expr::Identifier("imms".into())], 
                 })),
-                right: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })),
+                right: Box::new(Expr::DecimalConstant(1)),
             })), 
             right: Box::new(Expr::Call(CallExpr { 
                 identifier: Box::new(Expr::Identifier("UInt".into())), 
@@ -828,7 +813,7 @@ mod tests {
             left: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::NotEqual,
                 left: Box::new(Expr::Identifier("imms".into())),
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "011111".into() })),
+                right: Box::new(Expr::BinaryConstant("011111".into())),
             })),
             right: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
@@ -838,7 +823,7 @@ mod tests {
                         identifier: Box::new(Expr::Identifier("UInt".into())), 
                         arguments: vec![Expr::Identifier("imms".into())], 
                     })),
-                    right: Box::new(Expr::DecimalConstant(DecimalConstantExpr { value: 1 })),
+                    right: Box::new(Expr::DecimalConstant(1)),
                 })), 
                 right: Box::new(Expr::Call(CallExpr { 
                     identifier: Box::new(Expr::Identifier("UInt".into())), 
@@ -858,18 +843,18 @@ mod tests {
                 left: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("imms".into())),
-                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                    right: Box::new(Expr::BinaryConstant("1".into())),
                 })),
                 right: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("immr".into())),
-                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                    right: Box::new(Expr::BinaryConstant("1".into())),
                 })),
             })),
             right: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("S".into())),
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                right: Box::new(Expr::BinaryConstant("1".into())),
             })),
         }));    
     }
@@ -880,7 +865,7 @@ mod tests {
         assert_eq!(ast, Expr::Binary(BinaryExpr {
             op: BinaryOperator::Equal,
             left: Box::new(Expr::Identifier("Rn".into())),
-            right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() }))
+            right: Box::new(Expr::BinaryConstant("1".into()))
         }));
     }
 
@@ -892,19 +877,19 @@ mod tests {
             left: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("sh".into())), 
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() })),
+                right: Box::new(Expr::BinaryConstant("0".into())),
             })),
             right: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::LogicalOr,
                 left: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("Rd".into())), 
-                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                    right: Box::new(Expr::BinaryConstant("1".into())),
                 })),
                 right: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("Rn".into())), 
-                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                    right: Box::new(Expr::BinaryConstant("1".into())),
                 })),
             })),
         }));
@@ -920,18 +905,18 @@ mod tests {
                 left: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("sh".into())), 
-                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "0".into() })),
+                    right: Box::new(Expr::BinaryConstant("0".into())),
                 })),
                 right: Box::new(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("Rd".into())), 
-                    right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                    right: Box::new(Expr::BinaryConstant("1".into())),
                 })),
             })),
             right: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("Rn".into())), 
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })),
+                right: Box::new(Expr::BinaryConstant("1".into())),
             })),
         }));
     }
@@ -960,7 +945,7 @@ mod tests {
             operand: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Identifier("S".into())), 
-                right: Box::new(Expr::BinaryConstant(BinaryConstantExpr { value: "1".into() })), 
+                right: Box::new(Expr::BinaryConstant("1".into())), 
             })), 
         }));
     }
@@ -1026,9 +1011,7 @@ mod tests {
                 identifier: "X".into(),
                 arguments: vec![
                     Expr::Identifier("n".into()),
-                    Expr::DecimalConstant(DecimalConstantExpr {
-                        value: 64
-                    }),
+                    Expr::DecimalConstant(64),
                 ],
             }),
         }));
@@ -1041,9 +1024,7 @@ mod tests {
                 identifier: "X".into(),
                 arguments: vec![
                     Expr::Identifier("s".into()),
-                    Expr::DecimalConstant(DecimalConstantExpr {
-                        value: 32,
-                    }),
+                    Expr::DecimalConstant(32),
                 ],
             }),
             src: Expr::Identifier("n".into()),
@@ -1059,9 +1040,7 @@ mod tests {
             dest: Expr::Identifier("datasize".into()),
             src: Expr::Binary(BinaryExpr {
                 op: BinaryOperator::LeftShift,
-                left: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                    value: 8,
-                })),
+                left: Box::new(Expr::DecimalConstant(8)),
                 right: Box::new(Expr::Identifier("scale".into())),
             }),
         }));
@@ -1086,9 +1065,7 @@ mod tests {
             dest: Expr::Identifier("data".into()),
             src: Expr::MemAccess(MemAccessExpr {
                 address: Box::new(Expr::Identifier("address".into())),
-                size: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                    value: 2
-                })),
+                size: Box::new(Expr::DecimalConstant(2)),
                 access_descriptor: Box::new(Expr::Identifier("accdesc".into())),
             }),
         }));
@@ -1104,9 +1081,7 @@ mod tests {
                 condition: Condition::If(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
                     left: Box::new(Expr::Identifier("n".into())),
-                    right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                        value: 31,
-                    })),
+                    right: Box::new(Expr::DecimalConstant(31)),
                 })),
                 block: vec![
                     Statement::Assignment(AssignmentStmt {
@@ -1136,9 +1111,7 @@ mod tests {
                     condition: Condition::If(Expr::Binary(BinaryExpr {
                         op: BinaryOperator::Equal,
                         left: Box::new(Expr::Identifier("n".into())),
-                        right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                            value: 31
-                        })),
+                        right: Box::new(Expr::DecimalConstant(31)),
                     })),
                     block: vec![
                         Statement::Assignment(AssignmentStmt {
@@ -1156,9 +1129,7 @@ mod tests {
                     condition: Condition::ElseIf(Expr::Binary(BinaryExpr {
                         op: BinaryOperator::Equal,
                         left: Box::new(Expr::Identifier("n".into())),
-                        right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                            value: 30,
-                        })),
+                        right: Box::new(Expr::DecimalConstant(30)),
                     })),
                     block: vec![
                         Statement::Assignment(AssignmentStmt {
@@ -1189,9 +1160,7 @@ mod tests {
                     condition: Condition::If(Expr::Binary(BinaryExpr {
                         op: BinaryOperator::Equal,
                         left: Box::new(Expr::Identifier("n".into())),
-                        right: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                            value: 31,
-                        })),
+                        right: Box::new(Expr::DecimalConstant(31)),
                     })),
                     block: vec![
                         Statement::Assignment(AssignmentStmt {
@@ -1212,9 +1181,7 @@ mod tests {
                             quantifier: None,
                             dest_type: None,
                             dest: Expr::Identifier("address".into()),
-                            src: Expr::DecimalConstant(DecimalConstantExpr {
-                                value: 0,
-                            }),
+                            src: Expr::DecimalConstant(0),
                         }),
                     ]
                 },
@@ -1238,31 +1205,21 @@ mod tests {
                     condition: Box::new(Condition::If(Expr::Binary(BinaryExpr {
                         op: BinaryOperator::In,
                         left: Box::new(Expr::Identifier("immh".into())),
-                        right: Box::new(Expr::BinaryPattern(BinaryPatternExpr {
-                            value: "1xxx".into() 
-                        })),
+                        right: Box::new(Expr::BinaryPattern("1xxx".into())),
                     }))),
-                    expr: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                        value: 64
-                    })),
+                    expr: Box::new(Expr::DecimalConstant(64)),
                 },
                 ConditionalExpr {
                     condition: Box::new(Condition::ElseIf(Expr::Binary(BinaryExpr {
                         op: BinaryOperator::In,
                         left: Box::new(Expr::Identifier("immh".into())),
-                        right: Box::new(Expr::BinaryPattern(BinaryPatternExpr {
-                            value: "01xx".into()
-                        })),
+                        right: Box::new(Expr::BinaryPattern("01xx".into())),
                     }))),
-                    expr: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                        value: 32
-                    })),
+                    expr: Box::new(Expr::DecimalConstant(32)),
                 },
                 ConditionalExpr {
                     condition: Box::new(Condition::Else),
-                    expr: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
-                        value: 16
-                    })),
+                    expr: Box::new(Expr::DecimalConstant(16)),
                 },
             ])
         }));
@@ -1275,9 +1232,7 @@ mod tests {
             condition: Box::new(Condition::If(Expr::Binary(BinaryExpr {
                 op: BinaryOperator::In,
                 left: Box::new(Expr::Identifier("immh".into())),
-                right: Box::new(Expr::BinaryPattern(BinaryPatternExpr {
-                    value: "000x".into()
-                })),
+                right: Box::new(Expr::BinaryPattern("000x".into())),
             }))),
             expr: Box::new(Expr::Identifier("UNDEFINED".into())),
         }));
