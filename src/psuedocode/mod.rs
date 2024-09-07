@@ -6,8 +6,8 @@ use nom::bytes::complete::{tag, take_while, take_while1};
 use nom::combinator::peek;
 use nom::character::complete::char;
 use nom::branch::alt;
-use nom::multi::{many1, separated_list0, separated_list1};
-use nom::sequence::{delimited, preceded, separated_pair, terminated};
+use nom::multi::{separated_list0, separated_list1, many1};
+use nom::sequence::{delimited, preceded, separated_pair, terminated, tuple};
 use nom::error::{Error, ErrorKind};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -32,15 +32,15 @@ pub struct ConditionalBlock {
 pub enum Statement {
     Assignment(AssignmentStmt),
     Decl(DeclStmt),
-    Conditional(ConditionalStmt),
+    Cond(ConditionalStmt),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssignmentStmt {
     pub quantifier: Option<Expr>,
     pub dest_type: Option<Expr>,
-    pub dest: Box<Expr>,
-    pub src: Box<Expr>,
+    pub dest: Expr,
+    pub src: Expr,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +52,7 @@ pub struct DeclStmt {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
+    Cond(Vec<ConditionalExpr>),
     Binary(BinaryExpr),
     Not(NotOperator),
     Identifier(String),
@@ -62,6 +63,12 @@ pub enum Expr {
     Call(CallExpr),
     MemAccess(MemAccessExpr),
     Type(Type)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConditionalExpr {
+    condition: Box<Condition>,
+    expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -458,9 +465,60 @@ pub fn if_block(code: Span) -> IResult<Span, ConditionalBlock, Error<Span>> {
     Ok((i, ConditionalBlock{ condition, block }))
 }
 
+pub fn cf_keyword(code: Span) -> IResult<Span, &str, Error<Span>> {
+    let (i, keyword) = alt((
+        tag("if "),
+        tag(" else if "),
+    ))(code)?;
+    Ok((i, keyword.input))
+}
+
+pub fn inline_if(code: Span) -> IResult<Span, ConditionalExpr, Error<Span>> {
+    let (i, (keyword, condition, expr)) = tuple((
+        cf_keyword,
+        expr,
+        preceded(
+            tag(" then "),
+            term,
+        ),
+    ))(code)?;
+    let conditional_expr = match keyword {
+        "if " => ConditionalExpr { 
+            condition: Box::new(Condition::If(condition)),
+            expr: Box::new(expr),
+        },
+        " else if " => ConditionalExpr {
+            condition: Box::new(Condition::ElseIf(condition)),
+            expr: Box::new(expr),
+        },
+        _ => return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail))),
+    };
+    Ok((i, conditional_expr))
+}
+
+pub fn inline_else(code: Span) -> IResult<Span, ConditionalExpr, Error<Span>> {
+    let (i, expr) = preceded(
+        tag(" else "),
+        term,
+    )(code)?;
+    let conditional_expr = ConditionalExpr {
+        condition: Box::new(Condition::Else),
+        expr: Box::new(expr),
+    };
+    Ok((i, conditional_expr)) 
+}
+
+pub fn inline_conditional_expr(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (i, conditional_expr_list) = many1(alt((
+        inline_if,
+        inline_else,
+    )))(code)?;
+    Ok((i, Expr::Cond(conditional_expr_list)))
+}
+
 pub fn condition_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, blocks) = separated_list1(tag("\n"), if_block)(code)?;
-    Ok((i, Statement::Conditional(ConditionalStmt { blocks })))
+    Ok((i, Statement::Cond(ConditionalStmt { blocks })))
 }
 
 pub fn decl(code: Span) -> IResult<Span, Statement, Error<Span>> {
@@ -485,15 +543,17 @@ pub fn assign(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, (mut lhs_list, src)) = separated_pair(
         separated_list1(tag(" "), lexpr_atom),
         tag(" = "),
-        terminated(expr, tag(";")),
+        terminated(
+            alt((inline_conditional_expr, expr)), 
+            tag(";")),
     )(code)?;
     if lhs_list.len() < 1 {
         return Err(nom::Err::Error(Error::new(i, ErrorKind::Fail)));
     }
-    let dest = Box::new(lhs_list.pop().unwrap());
+    let dest = lhs_list.pop().unwrap();
     let dest_type = lhs_list.pop();
     let quantifier = lhs_list.pop();
-    Ok((i, Statement::Assignment(AssignmentStmt { quantifier, dest_type, dest, src: Box::new(src) })))
+    Ok((i, Statement::Assignment(AssignmentStmt { quantifier, dest_type, dest, src })))
 }
 
 pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
@@ -898,11 +958,11 @@ mod tests {
         assert_eq!(ast, Statement::Assignment(AssignmentStmt { 
             quantifier: None, 
             dest_type: Some(Expr::Type(Type::Integer)), 
-            dest: Box::new(Expr::Identifier("n".into())), 
-            src: Box::new(Expr::Call(CallExpr { 
+            dest: Expr::Identifier("n".into()), 
+            src: Expr::Call(CallExpr { 
                 identifier: Box::new(Expr::Identifier("UInt".into())), 
                 arguments: vec![Expr::Identifier("Rn".into())],
-            })), 
+            }), 
         }));
     }
 
@@ -912,8 +972,8 @@ mod tests {
         assert_eq!(ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: Some(Expr::Type(Type::BitVector(4))),
-            dest: Box::new(Expr::Identifier("options".into())),
-            src: Box::new(Expr::Identifier("op2".into())),
+            dest: Expr::Identifier("options".into()),
+            src: Expr::Identifier("op2".into()),
         }));
     }
 
@@ -923,22 +983,22 @@ mod tests {
         assert_eq!(ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: None,
-            dest: Box::new(Expr::Identifier("address".into())),
-            src: Box::new(Expr::Register(RegisterExpr {
+            dest: Expr::Identifier("address".into()),
+            src: Expr::Register(RegisterExpr {
                 identifier: "SP".into(),
                 arguments: vec![],
-            })),
+            }),
         }));
 
         let lexpr_ast = parse_stmt("SP[] = address;").unwrap();
         assert_eq!(lexpr_ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: None,
-            dest: Box::new(Expr::Register(RegisterExpr {
+            dest: Expr::Register(RegisterExpr {
                 identifier: "SP".into(),
                 arguments: vec![],
-            })),
-            src: Box::new(Expr::Identifier("address".into())),
+            }),
+            src: Expr::Identifier("address".into()),
         }));
     }
 
@@ -948,8 +1008,8 @@ mod tests {
         assert_eq!(ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: None,
-            dest: Box::new(Expr::Identifier("address".into())),
-            src: Box::new(Expr::Register(RegisterExpr {
+            dest: Expr::Identifier("address".into()),
+            src: Expr::Register(RegisterExpr {
                 identifier: "X".into(),
                 arguments: vec![
                     Expr::Identifier("n".into()),
@@ -957,14 +1017,14 @@ mod tests {
                         value: 64
                     }),
                 ],
-            })),
+            }),
         }));
 
         let lexpr_ast = parse_stmt("X[s, 32] = n;").unwrap();
         assert_eq!(lexpr_ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: None,
-            dest: Box::new(Expr::Register(RegisterExpr {
+            dest: Expr::Register(RegisterExpr {
                 identifier: "X".into(),
                 arguments: vec![
                     Expr::Identifier("s".into()),
@@ -972,8 +1032,8 @@ mod tests {
                         value: 32,
                     }),
                 ],
-            })),
-            src: Box::new(Expr::Identifier("n".into())),
+            }),
+            src: Expr::Identifier("n".into()),
         }));
     }
 
@@ -983,14 +1043,14 @@ mod tests {
         assert_eq!(ast, Statement::Assignment(AssignmentStmt {
             quantifier: Some(Expr::Identifier("constant".into())),
             dest_type: Some(Expr::Type(Type::Integer)),
-            dest: Box::new(Expr::Identifier("datasize".into())),
-            src: Box::new(Expr::Binary(BinaryExpr {
+            dest: Expr::Identifier("datasize".into()),
+            src: Expr::Binary(BinaryExpr {
                 op: BinaryOperator::LeftShift,
                 left: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
                     value: 8,
                 })),
                 right: Box::new(Expr::Identifier("scale".into())),
-            })),
+            }),
         }));
     }
 
@@ -1010,14 +1070,14 @@ mod tests {
         assert_eq!(ast, Statement::Assignment(AssignmentStmt {
             quantifier: None,
             dest_type: None,
-            dest: Box::new(Expr::Identifier("data".into())),
-            src: Box::new(Expr::MemAccess(MemAccessExpr {
+            dest: Expr::Identifier("data".into()),
+            src: Expr::MemAccess(MemAccessExpr {
                 address: Box::new(Expr::Identifier("address".into())),
                 size: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
                     value: 2
                 })),
                 access_descriptor: Box::new(Expr::Identifier("accdesc".into())),
-            })),
+            }),
         }));
     }
 
@@ -1026,7 +1086,7 @@ mod tests {
         let ast = parse_stmt("if n == 31 then\n    \
             address = SP[];\n"
         ).unwrap();
-        assert_eq!(ast, Statement::Conditional(ConditionalStmt {
+        assert_eq!(ast, Statement::Cond(ConditionalStmt {
             blocks: vec![ConditionalBlock {
                 condition: Condition::If(Expr::Binary(BinaryExpr {
                     op: BinaryOperator::Equal,
@@ -1039,11 +1099,11 @@ mod tests {
                     Statement::Assignment(AssignmentStmt {
                         quantifier: None,
                         dest_type: None,
-                        dest: Box::new(Expr::Identifier("address".into())),
-                        src: Box::new(Expr::Register(RegisterExpr {
+                        dest: Expr::Identifier("address".into()),
+                        src: Expr::Register(RegisterExpr {
                             identifier: "SP".into(),
                             arguments: vec![],
-                        })),
+                        }),
                     })
                 ],
             }],
@@ -1057,7 +1117,7 @@ mod tests {
             else if n == 30 then\n    \
             address = SP[];\n"
         ).unwrap();
-        assert_eq!(ast, Statement::Conditional(ConditionalStmt {
+        assert_eq!(ast, Statement::Cond(ConditionalStmt {
             blocks: vec![
                 ConditionalBlock {
                     condition: Condition::If(Expr::Binary(BinaryExpr {
@@ -1071,11 +1131,11 @@ mod tests {
                         Statement::Assignment(AssignmentStmt {
                             quantifier: None,
                             dest_type: None,
-                            dest: Box::new(Expr::Identifier("address".into())),
-                            src: Box::new(Expr::Register(RegisterExpr {
+                            dest: Expr::Identifier("address".into()),
+                            src: Expr::Register(RegisterExpr {
                                 identifier: "SP".into(),
                                 arguments: vec![],
-                            })),
+                            }),
                         }),
                     ],
                 },
@@ -1091,11 +1151,11 @@ mod tests {
                         Statement::Assignment(AssignmentStmt {
                             quantifier: None,
                             dest_type: None,
-                            dest: Box::new(Expr::Identifier("address".into())),
-                            src: Box::new(Expr::Register(RegisterExpr {
+                            dest: Expr::Identifier("address".into()),
+                            src: Expr::Register(RegisterExpr {
                                 identifier: "SP".into(),
                                 arguments: vec![],
-                            })),
+                            }),
                         }),
                     ]
                 }
@@ -1110,7 +1170,7 @@ mod tests {
             else\n    \
             address = 0;\n"
         ).unwrap();
-        assert_eq!(ast, Statement::Conditional(ConditionalStmt {
+        assert_eq!(ast, Statement::Cond(ConditionalStmt {
             blocks: vec![
                 ConditionalBlock {
                     condition: Condition::If(Expr::Binary(BinaryExpr {
@@ -1124,11 +1184,11 @@ mod tests {
                         Statement::Assignment(AssignmentStmt {
                             quantifier: None,
                             dest_type: None,
-                            dest: Box::new(Expr::Identifier("address".into())),
-                            src: Box::new(Expr::Register(RegisterExpr {
+                            dest: Expr::Identifier("address".into()),
+                            src: Expr::Register(RegisterExpr {
                                 identifier: "SP".into(),
                                 arguments: vec![],
-                            })),
+                            }),
                         }),
                     ]
                 },
@@ -1138,14 +1198,60 @@ mod tests {
                         Statement::Assignment(AssignmentStmt {
                             quantifier: None,
                             dest_type: None,
-                            dest: Box::new(Expr::Identifier("address".into())),
-                            src: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                            dest: Expr::Identifier("address".into()),
+                            src: Expr::DecimalConstant(DecimalConstantExpr {
                                 value: 0,
-                            })),
+                            }),
                         }),
                     ]
                 },
             ]
+        }));
+    }
+
+    #[test]
+    pub fn test_inline_conditional() {
+        let ast = parse_stmt("constant integer esize = \
+            if immh IN {'1xxx'} then 64 \
+            else if immh IN {'01xx'} then 32 \
+            else 16;"
+        ).unwrap();
+        assert_eq!(ast, Statement::Assignment(AssignmentStmt {
+            quantifier: Some(Expr::Identifier("constant".into())),
+            dest_type: Some(Expr::Type(Type::Integer)),
+            dest: Expr::Identifier("esize".into()),
+            src: Expr::Cond(vec![
+                ConditionalExpr {
+                    condition: Box::new(Condition::If(Expr::Binary(BinaryExpr {
+                        op: BinaryOperator::In,
+                        left: Box::new(Expr::Identifier("immh".into())),
+                        right: Box::new(Expr::BinaryPattern(BinaryPatternExpr {
+                            value: "1xxx".into() 
+                        })),
+                    }))),
+                    expr: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                        value: 64
+                    })),
+                },
+                ConditionalExpr {
+                    condition: Box::new(Condition::ElseIf(Expr::Binary(BinaryExpr {
+                        op: BinaryOperator::In,
+                        left: Box::new(Expr::Identifier("immh".into())),
+                        right: Box::new(Expr::BinaryPattern(BinaryPatternExpr {
+                            value: "01xx".into()
+                        })),
+                    }))),
+                    expr: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                        value: 32
+                    })),
+                },
+                ConditionalExpr {
+                    condition: Box::new(Condition::Else),
+                    expr: Box::new(Expr::DecimalConstant(DecimalConstantExpr {
+                        value: 16
+                    })),
+                },
+            ])
         }));
     }
 }
