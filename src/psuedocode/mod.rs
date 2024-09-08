@@ -30,6 +30,7 @@ pub struct ConditionalBlock {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
+    Assert(Expr),
     Assignment(AssignmentStmt),
     Decl(DeclStmt),
     Cond(ConditionalStmt),
@@ -63,6 +64,7 @@ pub enum Expr {
     Register(RegisterExpr),
     Call(CallExpr),
     MemAccess(MemAccessExpr),
+    List(Vec<Expr>),
     Type(Type)
 }
 
@@ -302,6 +304,15 @@ pub fn mem_access(code: Span) -> IResult<Span, Expr, Error<Span>> {
     })))
 }
 
+pub fn list(code: Span) -> IResult<Span, Expr, Error<Span>> {
+    let (i, ident_list) = delimited(
+        tag("{"),
+        separated_list1(tag(", "), identifier),
+        tag("}"),
+    )(code)?;
+    Ok((i, Expr::List(ident_list)))
+}
+
 pub fn lexpr_atom(code: Span) -> IResult<Span, Expr, Error<Span>> {
     alt((
         mem_access,
@@ -333,6 +344,7 @@ pub fn term(code: Span) -> IResult<Span, Expr, Error<Span>> {
             decimal_constant,
             mem_access,
             register,
+            list,
             identifier,
         )),
     )(code)
@@ -554,8 +566,17 @@ pub fn assign(code: Span) -> IResult<Span, Statement, Error<Span>> {
     Ok((i, Statement::Assignment(AssignmentStmt { quantifier, dest_type, dest, src })))
 }
 
+pub fn assert_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    let (i, expr) = preceded(
+        tag("assert "), 
+        terminated(expr, tag(";"))
+    )(code)?;
+    Ok((i, Statement::Assert(expr)))
+}
+
 pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     alt((
+        assert_stmt,
         condition_stmt,
         assign,
         decl,
@@ -748,7 +769,8 @@ mod tests {
     #[test]
     pub fn test_decimal_constant() {
         let ast = parse_expr("1").unwrap();
-        assert_eq!(ast, Expr::DecimalConstant(1))
+        let one = Expr::DecimalConstant(1);
+        assert_eq!(ast, one);
     }
 
     #[test]
@@ -1226,7 +1248,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_decl() {
+    pub fn test_inline_decl() {
         let ast = parse_stmt("if immh IN {'000x'} then UNDEFINED;").unwrap();
         assert_eq!(ast, Statement::CondDecl(ConditionalExpr {
             condition: Box::new(Condition::If(Expr::Binary(BinaryExpr {
@@ -1236,5 +1258,18 @@ mod tests {
             }))),
             expr: Box::new(Expr::Identifier("UNDEFINED".into())),
         }));
+    }
+
+    #[test]
+    pub fn test_assert() {
+        let ast = parse_stmt("assert c IN {Constraint_WBSUPPRESS, Constraint_UNKNOWN};").unwrap();
+        assert_eq!(ast, Statement::Assert(Expr::Binary(BinaryExpr {
+            op: BinaryOperator::In,
+            left: Box::new(Expr::Identifier("c".into())),
+            right: Box::new(Expr::List(vec![
+                Expr::Identifier("Constraint_WBSUPPRESS".into()),
+                Expr::Identifier("Constraint_UNKNOWN".into()),
+            ])),
+        })));
     }
 }
