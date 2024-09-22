@@ -1,6 +1,8 @@
 pub mod span;
 use span::Span;
 
+use std::collections::HashMap;
+
 use nom::IResult;
 use nom::bytes::complete::{tag, take_while, take_while1};
 use nom::combinator::peek;
@@ -32,9 +34,10 @@ pub struct ConditionalBlock {
 pub enum Statement {
     Assert(Expr),
     Assignment(AssignmentStmt),
-    Decl(DeclStmt),
+    Case(CaseStmt),
     Cond(ConditionalStmt),
     CondDecl(ConditionalExpr),
+    Decl(DeclStmt),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +46,12 @@ pub struct AssignmentStmt {
     pub dest_type: Option<Expr>,
     pub dest: Expr,
     pub src: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaseStmt {
+    pub identifier: String,
+    pub cases: HashMap<String, Statement>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -524,6 +533,45 @@ pub fn condition_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     Ok((i, Statement::Cond(ConditionalStmt { blocks })))
 }
 
+pub fn case(code: Span) -> IResult<Span, (&str, Statement), Error<Span>> {
+    let (i, (ident, stmt)) = preceded(
+        take_while(is_whitespace),
+        separated_pair(
+            preceded(
+                tag("when "),
+                take_while(is_alphanumeric)
+            ),
+        take_while(is_whitespace),
+        stmt,
+        )
+    )(code)?;
+    Ok((i, (ident.input, stmt)))
+}
+
+pub fn case_header(code: Span) -> IResult<Span, &str, Error<Span>> {
+    let (i, ident) = delimited(
+        tag("case "),
+        take_while(is_alphanumeric),
+        tag(" of"),
+    )(code)?;
+    Ok((i, ident.input))
+}
+
+pub fn case_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
+    let (i, (ident, mut cases)) = tuple((
+        terminated(case_header, tag("\n")),
+        separated_list1(tag("\n"), case),
+    ))(code)?;
+    let mut case_map: HashMap<String, Statement> = HashMap::new();
+    while let Some(case) = cases.pop() {
+        case_map.insert(case.0.into(), case.1);
+    }
+    Ok((i, Statement::Case(CaseStmt {
+        identifier: ident.into(),
+        cases: case_map,
+    })))
+}
+
 pub fn decl_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     let (i, mut atom_list) = terminated(
         separated_list1(tag(" "), lexpr_atom),
@@ -577,6 +625,7 @@ pub fn assert_stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
 pub fn stmt(code: Span) -> IResult<Span, Statement, Error<Span>> {
     alt((
         assert_stmt,
+        case_stmt,
         condition_stmt,
         assign,
         decl,
@@ -1271,5 +1320,26 @@ mod tests {
                 Expr::Identifier("Constraint_UNKNOWN".into()),
             ])),
         })));
+    }
+
+    #[test]
+    pub fn test_case_stmt() {
+        let ast = parse_stmt("case c of\n    \
+            when Constraint_UNKNOWN rt_unknown = FALSE;\n    \
+            when Constraint_UNDEF   rt_unknown = FALSE;\n"
+        ).unwrap();
+        let example_stmt = Statement::Assignment(AssignmentStmt{
+            quantifier: None,
+            dest_type: None,
+            dest: Expr::Identifier("rt_unknown".into()),
+            src: Expr::Identifier("FALSE".into()),
+        });
+        assert_eq!(ast, Statement::Case(CaseStmt{
+            identifier: "c".into(),
+            cases: HashMap::from([
+                ("Constraint_UNKNOWN".into(), example_stmt.clone()),
+                ("Constraint_UNDEF".into(), example_stmt.clone()),
+            ]),
+        }));
     }
 }
